@@ -1,0 +1,10 @@
+# Configurações do WhatsApp Business API
+VERIFY_TOKEN=seu_token_de_verificacao_aqui
+META_WA_TOKEN=seu_token_do_whatsapp_business_aqui
+WA_PHONE_NUMBER_ID=seu_phone_number_id_aqui
+
+# Configuração da ElevenLabs
+ELEVENLABS_API_KEY=sua_chave_da_elevenlabs_aqui
+
+# Configuração da OpenAI (NÃO USADO)
+OPENAI_API_KEY=sua_chave_da_openai_aqui
