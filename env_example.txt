@@ -6,5 +6,21 @@ WA_PHONE_NUMBER_ID=seu_phone_number_id_aqui
 # Configuração da ElevenLabs
 ELEVENLABS_API_KEY=sua_chave_da_elevenlabs_aqui
 
+# Configuração da Gladia
+GLADIA_API_KEY=sua_chave_da_gladia_aqui
+
+# Configuração do serviço de transcrição (elevenlabs ou gladia)
+TRANSCRIPTION_SERVICE=elevenlabs
+
+# Configuração do Twilio
+TWILIO_ACCOUNT_SID=seu_account_sid_do_twilio_aqui
+TWILIO_AUTH_TOKEN=seu_auth_token_do_twilio_aqui
+TWILIO_FROM_NUMBER=seu_numero_do_twilio_aqui
+
+# Configuração do Supabase
+SUPABASE_URL=sua_url_do_supabase_aqui
+SUPABASE_KEY=sua_chave_do_supabase_aqui
+SUPABASE_BUCKET_NAME=pdf-files
+
 # Configuração da OpenAI (NÃO USADO)
 OPENAI_API_KEY=sua_chave_da_openai_aqui

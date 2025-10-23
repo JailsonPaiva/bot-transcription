@@ -3,7 +3,7 @@ import re
 # Lista de produtos conhecidos (pode vir de um banco de dados no futuro)
 KNOWN_PRODUCTS = [
     "leite", "pão", "ovos", "queijo", "presunto", "arroz", "feijão", "maçã",
-    "banana", "tomate", "cebola", "alface", "frango", "carne moída", "sabão em pó"
+    "banana", "tomate", "cebola", "alface", "frango", "carne moída", "sabão em pó", "papel higiênico","carne", "macarrão", "fruta"
 ]
 
 def extract_products_from_text(text: str) -> list:
