@@ -11,6 +11,7 @@ load_dotenv()
 from app.services.whatsapp_cliente import download_media
 from app.services.transcription import transcribe_audio
 from app.services.gladia_transcription import transcribe_audio_gladia
+from app.services.gemini_correction import correct_transcription_with_gemini, analyze_transcription_context
 from app.services.nlp import extract_products_from_text
 from app.services.nlp_obras import extract_construction_context, extract_materials_and_quantities
 from app.services.pdf_generator import create_product_list_pdf
@@ -28,6 +29,9 @@ TRANSCRIPTION_SERVICE = os.getenv("TRANSCRIPTION_SERVICE", "elevenlabs")
 
 # Configuração do contexto de análise (compras ou obras)
 ANALYSIS_CONTEXT = os.getenv("ANALYSIS_CONTEXT", "compras")  # "compras" ou "obras"
+
+# Configuração para correção de transcrição com Gemini
+ENABLE_GEMINI_CORRECTION = os.getenv("ENABLE_GEMINI_CORRECTION", "true").lower() == "true"
 
 # Cache para evitar processamento duplicado
 processed_messages = {}
@@ -100,10 +104,33 @@ async def handle_webhook(request: Request):
                     raise HTTPException(status_code=500, detail="Failed to transcribe audio")
                 print(f"Texto Transcrito ({TRANSCRIPTION_SERVICE}): {transcribed_text}")
 
-                # 3. Processar o texto baseado no contexto configurado
+                # 3. Corrigir transcrição com Gemini (se habilitado)
+                final_text = transcribed_text
+                if ENABLE_GEMINI_CORRECTION:
+                    print("Aplicando correção de transcrição com Gemini...")
+                    
+                    # Primeiro, analisar o contexto automaticamente
+                    context_analysis = analyze_transcription_context(transcribed_text)
+                    detected_context = context_analysis.get("context", ANALYSIS_CONTEXT)
+                    confidence = context_analysis.get("confidence", 0.0)
+                    
+                    print(f"Contexto detectado pelo Gemini: {detected_context} (confiança: {confidence})")
+                    
+                    # Corrigir o texto com base no contexto detectado
+                    corrected_text = correct_transcription_with_gemini(transcribed_text, detected_context)
+                    
+                    if corrected_text:
+                        final_text = corrected_text
+                        print(f"Texto corrigido pelo Gemini: {final_text}")
+                    else:
+                        print("Falha na correção com Gemini, usando texto original")
+                else:
+                    print("Correção com Gemini desabilitada, usando texto original")
+
+                # 4. Processar o texto baseado no contexto configurado
                 if ANALYSIS_CONTEXT.lower() == "obras":
                     # Contexto de obras - extrair materiais de construção
-                    construction_context = extract_construction_context(transcribed_text)
+                    construction_context = extract_construction_context(final_text)
                     materials = construction_context["materiais"]
                     obra_type = construction_context["tipo_obra"]
                     
@@ -144,31 +171,31 @@ async def handle_webhook(request: Request):
                     formatted_number = f"whatsapp:+{from_number}" if not from_number.startswith("+") else from_number
                     send_text_message(formatted_number, f"Erro ao gerar orçamento. Materiais identificados: {', '.join([m['material'] for m in materials])}")
                 
-                else:
-                    # Contexto original de compras - extrair produtos
-                    products = extract_products_from_text(transcribed_text)
-                    print(f"Produtos Encontrados: {products}")
-                    
-                    if not products:
-                        # Implementar lógica para avisar o usuário que nenhum produto foi encontrado
-                        return Response(status_code=200)
+            else:
+                # Contexto original de compras - extrair produtos
+                products = extract_products_from_text(final_text)
+                print(f"Produtos Encontrados: {products}")
+                
+                if not products:
+                    # Implementar lógica para avisar o usuário que nenhum produto foi encontrado
+                    return Response(status_code=200)
 
-                    # 4. Gerar o arquivo PDF com a lista de produtos (FUNCIONALIDADE ORIGINAL)
-                    pdf_filename = f"lista_de_compras_{uuid.uuid4()}.pdf"
-                    pdf_path = f"app/temp/{pdf_filename}"
-                    create_product_list_pdf(products, pdf_path)
+                # 4. Gerar o arquivo PDF com a lista de produtos (FUNCIONALIDADE ORIGINAL)
+                pdf_filename = f"lista_de_compras_{uuid.uuid4()}.pdf"
+                pdf_path = f"app/temp/{pdf_filename}"
+                create_product_list_pdf(products, pdf_path)
 
-                    # 5. Enviar o PDF de volta para o usuário via Twilio (com upload para Supabase)
-                    # Formatar número para o formato internacional (assumindo Brasil +55)
-                    formatted_number = f"whatsapp:+{from_number}" if not from_number.startswith("+") else from_number
-                    
-                    # Tentar enviar via Twilio com upload para Supabase, mas não falhar se der erro
-                    try:
-                        twilio_success = send_pdf_message(formatted_number, pdf_path, f"Sua Lista de Compras + {products}")
-                        if not twilio_success:
-                            print("Aviso: Falha ao enviar via Twilio, mas continuando...")
-                    except Exception as twilio_error:
-                        print(f"Aviso: Erro no Twilio: {twilio_error}")
+                # 5. Enviar o PDF de volta para o usuário via Twilio (com upload para Supabase)
+                # Formatar número para o formato internacional (assumindo Brasil +55)
+                formatted_number = f"whatsapp:+{from_number}" if not from_number.startswith("+") else from_number
+                
+                # Tentar enviar via Twilio com upload para Supabase, mas não falhar se der erro
+                try:
+                    twilio_success = send_pdf_message(formatted_number, pdf_path, f"Sua Lista de Compras + {products}")
+                    if not twilio_success:
+                        print("Aviso: Falha ao enviar via Twilio, mas continuando...")
+                except Exception as twilio_error:
+                    print(f"Aviso: Erro no Twilio: {twilio_error}")
                 
                 # Limpeza dos arquivos temporários
                 try:
