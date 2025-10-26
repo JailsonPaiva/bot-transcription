@@ -21,6 +21,16 @@ ANALYSIS_CONTEXT=compras
 # Configuração para correção de transcrição com Gemini (true/false)
 ENABLE_GEMINI_CORRECTION=true
 
+# Configuração do serviço de envio de mensagens (twilio ou whatsapp)
+MESSAGE_SERVICE=twilio
+
+# Configuração do wrapper local do WhatsApp (para testes)
+LOCAL_WHATSAPP_ENABLED=false
+LOCAL_WHATSAPP_LOG_FILE=whatsapp_messages.log
+LOCAL_WHATSAPP_SIMULATE_DELAY=true
+LOCAL_WHATSAPP_DELAY_SECONDS=1.0
+LOCAL_WHATSAPP_SUCCESS_RATE=0.95
+
 # Configuração do Twilio
 TWILIO_ACCOUNT_SID=seu_account_sid_do_twilio_aqui
 TWILIO_AUTH_TOKEN=seu_auth_token_do_twilio_aqui

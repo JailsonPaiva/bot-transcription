@@ -17,6 +17,7 @@ from app.services.nlp_obras import extract_construction_context, extract_materia
 from app.services.pdf_generator import create_product_list_pdf
 from app.services.pdf_obras_generator import create_construction_budget_pdf, create_simple_materials_list_pdf
 from app.services.twilio_client import send_pdf_message, send_text_message
+from app.services.whatsapp_api_client import send_whatsapp_pdf_message, send_whatsapp_text_message
 
 # Configuração do FastAPI
 app = FastAPI()
@@ -33,8 +34,29 @@ ANALYSIS_CONTEXT = os.getenv("ANALYSIS_CONTEXT", "compras")  # "compras" ou "obr
 # Configuração para correção de transcrição com Gemini
 ENABLE_GEMINI_CORRECTION = os.getenv("ENABLE_GEMINI_CORRECTION", "true").lower() == "true"
 
+# Configuração do serviço de envio de mensagens (twilio ou whatsapp)
+MESSAGE_SERVICE = os.getenv("MESSAGE_SERVICE", "twilio").lower()
+
 # Cache para evitar processamento duplicado
 processed_messages = {}
+
+def send_message_with_configured_service(to_number: str, message_text: str) -> bool:
+    """
+    Envia mensagem de texto usando o serviço configurado (Twilio ou WhatsApp API).
+    """
+    if MESSAGE_SERVICE == "whatsapp":
+        return send_whatsapp_text_message(to_number, message_text)
+    else:  # twilio (padrão)
+        return send_text_message(to_number, message_text)
+
+def send_pdf_with_configured_service(to_number: str, pdf_path: str, caption: str) -> bool:
+    """
+    Envia PDF usando o serviço configurado (Twilio ou WhatsApp API).
+    """
+    if MESSAGE_SERVICE == "whatsapp":
+        return send_whatsapp_pdf_message(to_number, pdf_path, caption)
+    else:  # twilio (padrão)
+        return send_pdf_message(to_number, pdf_path, caption)
 
 @app.get("/webhook")
 async def verify_webhook(request: Request):
@@ -141,7 +163,7 @@ async def handle_webhook(request: Request):
                         # Enviar mensagem informando que nenhum material foi encontrado
                         try:
                             formatted_number = f"whatsapp:+{from_number}" if not from_number.startswith("+") else from_number
-                            send_text_message(formatted_number, "Não foi possível identificar materiais de construção no áudio. Tente falar mais claramente sobre os materiais necessários.")
+                            send_message_with_configured_service(formatted_number, "Não foi possível identificar materiais de construção no áudio. Tente falar mais claramente sobre os materiais necessários.")
                         except Exception as e:
                             print(f"Erro ao enviar mensagem de erro: {e}")
                         return Response(status_code=200)
@@ -154,22 +176,25 @@ async def handle_webhook(request: Request):
                     create_construction_budget_pdf(materials, obra_type, pdf_path)
                     print(f"PDF gerado com sucesso: {pdf_path}")
                     
-                    # 5. Enviar o PDF de volta para o usuário via Twilio
+                    # 5. Enviar o PDF de volta para o usuário
                     formatted_number = f"whatsapp:+{from_number}" if not from_number.startswith("+") else from_number
                     
-                    twilio_success = send_pdf_message(formatted_number, pdf_path, f"Orçamento de Materiais - {obra_type.title()} ({len(materials)} itens)")
-                    if twilio_success:
-                        print("PDF enviado com sucesso via Twilio")
+                    service_name = "WhatsApp API" if MESSAGE_SERVICE == "whatsapp" else "Twilio"
+                    print(f"Enviando PDF via {service_name}...")
+                    
+                    send_success = send_pdf_with_configured_service(formatted_number, pdf_path, f"Orçamento de Materiais - {obra_type.title()} ({len(materials)} itens)")
+                    if send_success:
+                        print(f"PDF enviado com sucesso via {service_name}")
                     else:
-                        print("Aviso: Falha ao enviar via Twilio")
+                        print(f"Aviso: Falha ao enviar via {service_name}")
                         # Enviar mensagem de texto como fallback
-                        send_text_message(formatted_number, f"Orçamento gerado com {len(materials)} materiais, mas houve problema no envio do PDF. Tente novamente.")
+                        send_message_with_configured_service(formatted_number, f"Orçamento gerado com {len(materials)} materiais, mas houve problema no envio do PDF. Tente novamente.")
                         
                 except Exception as pdf_error:
                     print(f"Erro ao gerar PDF: {pdf_error}")
                     # Enviar mensagem de erro
                     formatted_number = f"whatsapp:+{from_number}" if not from_number.startswith("+") else from_number
-                    send_text_message(formatted_number, f"Erro ao gerar orçamento. Materiais identificados: {', '.join([m['material'] for m in materials])}")
+                    send_message_with_configured_service(formatted_number, f"Erro ao gerar orçamento. Materiais identificados: {', '.join([m['material'] for m in materials])}")
                 
             else:
                 # Contexto original de compras - extrair produtos
@@ -185,17 +210,20 @@ async def handle_webhook(request: Request):
                 pdf_path = f"app/temp/{pdf_filename}"
                 create_product_list_pdf(products, pdf_path)
 
-                # 5. Enviar o PDF de volta para o usuário via Twilio (com upload para Supabase)
+                # 5. Enviar o PDF de volta para o usuário
                 # Formatar número para o formato internacional (assumindo Brasil +55)
                 formatted_number = f"whatsapp:+{from_number}" if not from_number.startswith("+") else from_number
                 
-                # Tentar enviar via Twilio com upload para Supabase, mas não falhar se der erro
+                service_name = "WhatsApp API" if MESSAGE_SERVICE == "whatsapp" else "Twilio"
+                print(f"Enviando PDF via {service_name}...")
+                
+                # Tentar enviar via serviço configurado, mas não falhar se der erro
                 try:
-                    twilio_success = send_pdf_message(formatted_number, pdf_path, f"Sua Lista de Compras + {products}")
-                    if not twilio_success:
-                        print("Aviso: Falha ao enviar via Twilio, mas continuando...")
-                except Exception as twilio_error:
-                    print(f"Aviso: Erro no Twilio: {twilio_error}")
+                    send_success = send_pdf_with_configured_service(formatted_number, pdf_path, f"Sua Lista de Compras ({len(products)} itens)")
+                    if not send_success:
+                        print(f"Aviso: Falha ao enviar via {service_name}, mas continuando...")
+                except Exception as send_error:
+                    print(f"Aviso: Erro no {service_name}: {send_error}")
                 
                 # Limpeza dos arquivos temporários
                 try:

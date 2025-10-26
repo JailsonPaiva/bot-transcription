@@ -9,7 +9,7 @@ Bot inteligente para WhatsApp que processa áudios de pedreiros e gera orçament
 - **Análise Contextual**: Detecta automaticamente se é sobre obras ou compras
 - **Extração de Materiais**: Identifica materiais de construção e quantidades
 - **Geração de PDF**: Cria orçamentos profissionais em PDF
-- **Envio Automático**: Envia o PDF de volta via WhatsApp
+- **Envio Automático**: Envia o PDF de volta via WhatsApp (Twilio ou WhatsApp Business API)
 
 ## 📋 Pré-requisitos
 
@@ -58,7 +58,10 @@ ENABLE_GEMINI_CORRECTION=true
 # Contexto de Análise
 ANALYSIS_CONTEXT=obras  # ou compras
 
-# Twilio (para envio de mensagens)
+# Serviço de Envio de Mensagens
+MESSAGE_SERVICE=twilio  # ou whatsapp
+
+# Twilio (para envio de mensagens - se MESSAGE_SERVICE=twilio)
 TWILIO_ACCOUNT_SID=seu_account_sid
 TWILIO_AUTH_TOKEN=seu_auth_token
 TWILIO_FROM_NUMBER=seu_numero_twilio
@@ -120,6 +123,55 @@ TRANSCRIPTION_SERVICE=gladia  # ou elevenlabs
 ```env
 ANALYSIS_CONTEXT=obras  # ou compras
 ```
+
+### Escolher Serviço de Envio de Mensagens
+```env
+MESSAGE_SERVICE=twilio  # ou whatsapp
+```
+
+#### Wrapper Local para Testes (WhatsApp API)
+
+Para testes e desenvolvimento, você pode usar o wrapper local que simula o comportamento da WhatsApp Business API:
+
+```env
+# Habilitar wrapper local
+LOCAL_WHATSAPP_ENABLED=true
+LOCAL_WHATSAPP_LOG_FILE=whatsapp_messages.log
+LOCAL_WHATSAPP_SIMULATE_DELAY=true
+LOCAL_WHATSAPP_DELAY_SECONDS=1.0
+LOCAL_WHATSAPP_SUCCESS_RATE=0.95
+```
+
+**Funcionalidades do Wrapper Local:**
+- ✅ Simula envio de mensagens de texto
+- ✅ Simula envio de documentos/PDFs
+- ✅ Simula delay da API real
+- ✅ Taxa de sucesso configurável
+- ✅ Logs detalhados para debug
+- ✅ Não requer credenciais reais
+- ✅ Ideal para desenvolvimento e testes
+
+**Como usar:**
+1. Configure `MESSAGE_SERVICE=whatsapp`
+2. Configure `LOCAL_WHATSAPP_ENABLED=true`
+3. Execute o bot normalmente
+4. Verifique os logs em `whatsapp_messages.log`
+
+#### Diferenças entre os Serviços:
+
+**Twilio:**
+- ✅ Mais estável e confiável
+- ✅ Suporte a múltiplas plataformas
+- ✅ Melhor para produção
+- ❌ Custo adicional por mensagem
+
+**WhatsApp Business API:**
+- ✅ Gratuito (dentro dos limites da Meta)
+- ✅ Integração nativa com WhatsApp
+- ✅ Melhor experiência do usuário
+- ✅ **Wrapper local para testes**
+- ❌ Mais complexo de configurar
+- ❌ Dependente da API da Meta
 
 ## 📊 Fluxo de Processamento
 
