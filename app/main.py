@@ -18,7 +18,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title="Bot Orçamento Obras",
-        version="1.2.0",
+        version="1.3.0",
         description="WhatsApp bot para orçamento de materiais de construção",
     )
     app.state.settings = settings

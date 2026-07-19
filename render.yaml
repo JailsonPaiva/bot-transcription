@@ -1,0 +1,60 @@
+# Blueprint Render — Web Service + Redis (Key Value)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Após o deploy: configure o webhook Meta para https://<seu-servico>.onrender.com/webhook
+
+services:
+  - type: web
+    name: bot-orcamento
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHONPATH
+        value: /app
+      - key: USE_REDIS
+        value: "true"
+      - key: REQUIRE_WEBHOOK_SIGNATURE
+        value: "true"
+      - key: MESSAGE_SERVICE
+        value: whatsapp
+      - key: TRANSCRIPTION_SERVICE
+        value: gladia
+      - key: ENABLE_GEMINI_CORRECTION
+        value: "true"
+      - key: LOCAL_WHATSAPP_ENABLED
+        value: "false"
+      - key: REDIS_URL
+        fromService:
+          name: bot-orcamento-redis
+          type: keyvalue
+          property: connectionString
+      # Secrets — preencher no Dashboard (sync: false) ou via Environment Group
+      - key: VERIFY_TOKEN
+        sync: false
+      - key: META_WA_TOKEN
+        sync: false
+      - key: WA_PHONE_NUMBER_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET_NAME
+        value: bot_orcamento
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GLADIA_API_KEY
+        sync: false
+
+  - type: keyvalue
+    name: bot-orcamento-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []

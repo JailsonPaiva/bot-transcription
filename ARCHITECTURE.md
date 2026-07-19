@@ -12,6 +12,9 @@ app/
 supabase/migrations/      # SQL do catálogo e histórico
 scripts/                  # utilitários (seed do catálogo)
 tests/                    # testes unitários (edição de lista, LGPD)
+Dockerfile                # imagem de produção (Render)
+render.yaml               # Blueprint Render (web + Redis)
+.env.example              # variáveis necessárias (sem segredos)
 ```
 
 ## Sprint 1
@@ -49,13 +52,45 @@ python scripts/seed_catalog.py --overwrite-prices
 - LGPD mínima: `privacidade` e `apagar meus dados` (limpa sessão Redis + histórico `budgets`)
 - Rate limit de áudio por `wa_id` (já na Sprint 1; mantido)
 
-## Subir Redis
+## Deploy na Render (preparado)
+
+Arquivos: `Dockerfile`, `render.yaml`, `.env.example`.
+
+### Passo a passo
+
+1. Suba o código no GitHub (branch `main`).
+2. No [Render Dashboard](https://dashboard.render.com): **New → Blueprint** e selecione o repositório (lê `render.yaml`).
+3. Preencha os secrets marcados `sync: false` (iguais ao `.env` local):
+   - `VERIFY_TOKEN`, `META_WA_TOKEN`, `WA_PHONE_NUMBER_ID`, `META_APP_SECRET`
+   - `SUPABASE_URL`, `SUPABASE_KEY`
+   - `GEMINI_API_KEY`, `GLADIA_API_KEY`
+4. Aguarde o deploy. Health: `GET https://<servico>.onrender.com/health`
+5. Na Meta (WhatsApp Cloud API), webhook:
+   - Callback URL: `https://<servico>.onrender.com/webhook`
+   - Verify token: o mesmo de `VERIFY_TOKEN`
+6. Em produção, mantenha `REQUIRE_WEBHOOK_SIGNATURE=true` (já no blueprint).
+
+### Observações
+
+- O blueprint usa plano **starter** (evita cold start do free, importante para webhook Meta).
+- Redis vem do Key Value (`REDIS_URL` injetado automaticamente).
+- Não faça commit de `.env`.
+- Seed do catálogo: rode uma vez apontando para o mesmo Supabase (`scripts/seed_catalog.py`).
+
+### Teste local da imagem
+
+```bash
+docker build -t bot-orcamento .
+docker run --rm -p 8000:8000 --env-file .env -e REDIS_URL=redis://host.docker.internal:6379/0 bot-orcamento
+```
+
+## Subir Redis (local)
 
 ```bash
 docker compose up -d redis
 ```
 
-## Rodar API
+## Rodar API (local)
 
 Use a skill `restart-servers` (mata processos e sobe **sem** `--reload`):
 

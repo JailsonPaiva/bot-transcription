@@ -1,0 +1,15 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.cursor
+.env
+.env.*
+!.env.example
+whatsapp_messages.log
+body.txt
+app/temp
+*.pdf
+.redis-data
