@@ -43,6 +43,19 @@ class Settings(BaseSettings):
     # Rate limit simples (Sprint 1 base)
     max_audio_per_hour: int = Field(default=20, alias="MAX_AUDIO_PER_HOUR")
 
+    # Branding do PDF (futuro: por cliente no banco)
+    pdf_company_name: str = Field(default="Sua Empresa de Materiais", alias="PDF_COMPANY_NAME")
+    pdf_tagline: str = Field(
+        default="Orçamentos para obra, direto no WhatsApp",
+        alias="PDF_TAGLINE",
+    )
+    pdf_logo_path: str = Field(default="", alias="PDF_LOGO_PATH")
+    pdf_phone: str = Field(default="", alias="PDF_PHONE")
+    pdf_website: str = Field(default="", alias="PDF_WEBSITE")
+    pdf_primary_color: str = Field(default="27,54,93", alias="PDF_PRIMARY_COLOR")
+    pdf_accent_color: str = Field(default="242,141,62", alias="PDF_ACCENT_COLOR")
+    pdf_validade_dias: int = Field(default=7, alias="PDF_VALIDADE_DIAS")
+
     @property
     def message_service_normalized(self) -> str:
         return self.message_service.lower().strip()
