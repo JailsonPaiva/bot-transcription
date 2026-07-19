@@ -91,13 +91,54 @@ def is_cancel_message(text: str) -> bool:
     }
 
 
+def is_last_budget_request(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    normalized = re.sub(r"[!?.]", "", normalized)
+    normalized = (
+        normalized.replace("á", "a")
+        .replace("ã", "a")
+        .replace("â", "a")
+        .replace("é", "e")
+        .replace("ê", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ô", "o")
+        .replace("ú", "u")
+        .replace("ç", "c")
+    )
+    triggers = {
+        "ultimo orcamento",
+        "manda de novo",
+        "reenviar orcamento",
+        "ultimo pdf",
+        "me manda o ultimo",
+        "enviar ultimo orcamento",
+    }
+    if normalized in triggers:
+        return True
+    return (
+        "ultimo orcamento" in normalized
+        or "reenviar orcamento" in normalized
+        or "manda de novo o orcamento" in normalized
+    )
+
+
 def build_confirmation_message(materials: List[Dict[str, str]], obra_type: str) -> str:
     from app.services.nlp_obras import format_materials_for_message
 
     lista = format_materials_for_message(materials)
+    total = 0.0
+    for item in materials:
+        try:
+            total += float(str(item.get("preco_total", "0")).replace(",", "."))
+        except ValueError:
+            pass
+    total_txt = f"R$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return (
         f"Identifiquei estes materiais para *{obra_type}*:\n\n"
         f"{lista}\n\n"
+        f"*Total estimado:* {total_txt}\n\n"
         "Responda *SIM* para gerar o PDF do orçamento.\n"
-        "Responda *NÃO* para cancelar e enviar outro áudio."
+        "Responda *NÃO* para cancelar e enviar outro áudio.\n"
+        "Depois você também pode pedir: *último orçamento*."
     )

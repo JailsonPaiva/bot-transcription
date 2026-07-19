@@ -5,10 +5,8 @@ from typing import Dict, List, Optional
 
 import google.generativeai as genai
 
-from app.services.nlp_obras import (
-    get_catalog_canonical_names,
-    validate_materials_against_catalog,
-)
+from app.domain.catalog_service import get_canonical_names
+from app.services.nlp_obras import validate_materials_against_catalog
 
 # Modelo padrão atual (gemini-2.5-flash não está disponível para novas contas)
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
@@ -119,7 +117,7 @@ def extract_materials_json_with_gemini(transcribed_text: str) -> Optional[Dict]:
     if not api_key:
         return None
 
-    catalog = get_catalog_canonical_names()
+    catalog = get_canonical_names()
     catalog_str = ", ".join(catalog)
 
     try:

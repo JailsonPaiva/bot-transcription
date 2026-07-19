@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # Catálogo canônico: nome oficial -> sinônimos/variantes
 CATALOGO_MATERIAIS: Dict[str, List[str]] = {
@@ -245,22 +245,35 @@ def normalize_numbers_in_text(text: str) -> str:
     return re.sub(pattern, repl, text, flags=re.IGNORECASE)
 
 
+def get_active_catalog() -> Dict[str, List[str]]:
+    return _RUNTIME_CATALOG or CATALOGO_MATERIAIS
+
+
 def get_catalog_canonical_names() -> List[str]:
-    return sorted(CATALOGO_MATERIAIS.keys(), key=len, reverse=True)
+    return sorted(get_active_catalog().keys(), key=len, reverse=True)
 
 
-def build_synonym_index() -> List[tuple]:
+def build_synonym_index(catalog: Optional[Dict[str, List[str]]] = None) -> List[Tuple[str, str]]:
     """Lista (sinonimo_normalizado, nome_canonico) ordenada do mais longo para o mais curto."""
-    pairs = []
-    for canonical, synonyms in CATALOGO_MATERIAIS.items():
-        all_names = set([canonical] + synonyms)
+    source = catalog or get_active_catalog()
+    pairs: List[Tuple[str, str]] = []
+    for canonical, synonyms in source.items():
+        all_names = set([canonical] + list(synonyms))
         for name in all_names:
             pairs.append((normalize_text(name), canonical))
     pairs.sort(key=lambda item: len(item[0]), reverse=True)
     return pairs
 
 
-_SYNONYM_INDEX = build_synonym_index()
+_RUNTIME_CATALOG: Optional[Dict[str, List[str]]] = None
+_SYNONYM_INDEX = build_synonym_index(CATALOGO_MATERIAIS)
+
+
+def set_runtime_catalog(catalog: Dict[str, List[str]]) -> None:
+    """Atualiza o catálogo em runtime (ex.: carregado do Supabase)."""
+    global _RUNTIME_CATALOG, _SYNONYM_INDEX
+    _RUNTIME_CATALOG = {k: list(v) for k, v in catalog.items()}
+    _SYNONYM_INDEX = build_synonym_index(_RUNTIME_CATALOG)
 
 
 def match_catalog_name(raw_name: str) -> Optional[str]:
@@ -424,9 +437,15 @@ def extract_construction_context(text: str) -> Dict:
 def format_materials_for_message(materials: List[Dict[str, str]]) -> str:
     lines = []
     for i, material in enumerate(materials, 1):
-        lines.append(
-            f"{i}. {material['quantidade']} {material['unidade']} de {material['material']}"
-        )
+        line = f"{i}. {material['quantidade']} {material['unidade']} de {material['material']}"
+        if material.get("preco_total"):
+            try:
+                total = float(str(material["preco_total"]).replace(",", "."))
+                money = f"R$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                line += f" ({money})"
+            except ValueError:
+                pass
+        lines.append(line)
     return "\n".join(lines)
 
 

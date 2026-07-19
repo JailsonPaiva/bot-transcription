@@ -4,9 +4,10 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from app.core.config import Settings, get_settings
+from app.domain.catalog_service import calc_budget_total, enrich_materials_with_prices
 from app.domain.conversation import (
     ConversationSession,
     ConversationState,
@@ -15,8 +16,10 @@ from app.domain.conversation import (
     format_destination_number,
     is_cancel_message,
     is_confirmation_message,
+    is_last_budget_request,
 )
 from app.domain.materials import resolve_materials_from_text
+from app.infrastructure.budget_repository import get_last_budget, save_budget
 from app.infrastructure.messaging import send_pdf, send_text
 from app.infrastructure.retry import with_retries
 from app.infrastructure.store import StateStore, get_state_store
@@ -33,24 +36,42 @@ def _ensure_temp_dir() -> None:
 
 
 def _generate_and_send_pdf(
+    *,
     formatted_number: str,
-    materials,
+    wa_id: str,
+    materials: List[Dict[str, Any]],
     obra_type: str,
     settings: Settings,
+    persist: bool = True,
 ) -> None:
     _ensure_temp_dir()
+    materials = enrich_materials_with_prices(materials)
+    total_amount = calc_budget_total(materials)
     pdf_path = f"app/temp/orcamento_obra_{uuid.uuid4()}.pdf"
     try:
-        create_construction_budget_pdf(materials, obra_type, pdf_path)
-        logger.info("PDF gerado: %s", pdf_path)
+        create_construction_budget_pdf(
+            materials,
+            obra_type,
+            pdf_path,
+            total_amount=total_amount,
+        )
+        logger.info("PDF gerado: %s | total=%.2f", pdf_path, total_amount)
         ok = send_pdf(
             formatted_number,
             pdf_path,
-            f"Orçamento de Materiais - {obra_type.title()} ({len(materials)} itens)",
+            f"Orçamento de Materiais - {obra_type.title()} ({len(materials)} itens) | Total R$ {total_amount:.2f}",
             settings,
         )
         if ok:
             logger.info("PDF enviado com sucesso")
+            if persist:
+                save_budget(
+                    wa_id=wa_id,
+                    obra_type=obra_type,
+                    materials=materials,
+                    total_amount=total_amount,
+                    status="sent",
+                )
         else:
             send_text(
                 formatted_number,
@@ -72,6 +93,30 @@ def _generate_and_send_pdf(
                 pass
 
 
+def _handle_last_budget(wa_id: str, formatted_number: str, settings: Settings) -> bool:
+    last = get_last_budget(wa_id)
+    if not last:
+        send_text(
+            formatted_number,
+            "Não encontrei orçamento anterior para este número. Envie um áudio para gerar um novo.",
+            settings,
+        )
+        return True
+
+    materials = last.get("materials") or []
+    obra_type = last.get("obra_type") or "obra"
+    send_text(formatted_number, "Reenviando seu último orçamento...", settings)
+    _generate_and_send_pdf(
+        formatted_number=formatted_number,
+        wa_id=wa_id,
+        materials=materials,
+        obra_type=obra_type,
+        settings=settings,
+        persist=False,
+    )
+    return True
+
+
 def _handle_text(
     *,
     body: str,
@@ -80,6 +125,10 @@ def _handle_text(
     store: StateStore,
     settings: Settings,
 ) -> None:
+    if is_last_budget_request(body):
+        _handle_last_budget(wa_id, formatted_number, settings)
+        return
+
     session = store.get_session(wa_id)
 
     if session.state == ConversationState.AWAITING_CONFIRMATION and is_confirmation_message(body):
@@ -87,7 +136,13 @@ def _handle_text(
         obra_type = session.obra_type
         store.clear_session(wa_id)
         send_text(formatted_number, "Confirmado! Gerando o PDF do orçamento...", settings)
-        _generate_and_send_pdf(formatted_number, materials, obra_type, settings)
+        _generate_and_send_pdf(
+            formatted_number=formatted_number,
+            wa_id=wa_id,
+            materials=materials,
+            obra_type=obra_type,
+            settings=settings,
+        )
         store.save_session(
             wa_id,
             ConversationSession(state=ConversationState.PDF_SENT),
@@ -115,7 +170,8 @@ def _handle_text(
 
     send_text(
         formatted_number,
-        "Envie um áudio descrevendo os materiais da obra para eu montar o orçamento.",
+        "Envie um áudio descrevendo os materiais da obra para eu montar o orçamento.\n"
+        "Se quiser, peça também: *último orçamento*.",
         settings,
     )
 
@@ -177,8 +233,8 @@ def _handle_audio(
 
         logger.info("Texto transcrito: %s", transcribed)
 
-        final_text, materials, obra_type = resolve_materials_from_text(transcribed, settings)
-        logger.info("Materiais: %s | obra=%s", materials, obra_type)
+        final_text, materials, obra_type, total = resolve_materials_from_text(transcribed, settings)
+        logger.info("Materiais: %s | obra=%s | total=%.2f", materials, obra_type, total)
 
         if not materials:
             send_text(
@@ -217,10 +273,6 @@ def _handle_audio(
 
 
 def process_incoming_message(message_data: Dict[str, Any], settings: Settings | None = None) -> None:
-    """
-    Processa uma mensagem já validada/extraída do webhook.
-    Projetado para rodar em BackgroundTasks (Sprint 1) ou worker Redis/RQ (próximo passo).
-    """
     settings = settings or get_settings()
     store = get_state_store(settings)
 
