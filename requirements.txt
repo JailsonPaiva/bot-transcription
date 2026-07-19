@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 python-dotenv
+pydantic-settings
 requests
 openai
 fpdf2
@@ -8,3 +9,4 @@ twilio
 elevenlabs
 supabase
 google-generativeai
+redis
