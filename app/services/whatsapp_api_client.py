@@ -39,6 +39,11 @@ def get_whatsapp_api_credentials():
     
     return access_token, phone_number_id
 
+
+def normalize_whatsapp_to_number(to_number: str) -> str:
+    """Cloud API da Meta espera apenas dígitos (ex.: 5565996047289)."""
+    return "".join(ch for ch in to_number.replace("whatsapp:", "") if ch.isdigit())
+
 def send_whatsapp_text_message(to_number: str, message_text: str) -> bool:
     """
     Envia uma mensagem de texto via WhatsApp Business API ou wrapper local.
@@ -61,6 +66,8 @@ def send_whatsapp_text_message(to_number: str, message_text: str) -> bool:
     if not all([access_token, phone_number_id]):
         print("[Erro] Não foi possível enviar mensagem: credenciais da WhatsApp API ausentes.")
         return False
+
+    to_number = normalize_whatsapp_to_number(to_number)
     
     try:
         # URL da API do WhatsApp Business
@@ -126,6 +133,8 @@ def send_whatsapp_document_message(to_number: str, document_url: str, filename: 
     if not all([access_token, phone_number_id]):
         print("[Erro] Não foi possível enviar documento: credenciais da WhatsApp API ausentes.")
         return False
+
+    to_number = normalize_whatsapp_to_number(to_number)
     
     try:
         # URL da API do WhatsApp Business
@@ -170,51 +179,115 @@ def send_whatsapp_document_message(to_number: str, document_url: str, filename: 
         print(f"Erro ao enviar documento via WhatsApp API: {e}")
         return False
 
-def send_whatsapp_pdf_message(to_number: str, pdf_path: str, caption: str = "Sua Lista de Compras") -> bool:
+def send_whatsapp_document_by_media_id(
+    to_number: str,
+    media_id: str,
+    filename: str,
+    caption: str = "",
+) -> bool:
+    """Envia documento já hospedado na Meta (media_id)."""
+    access_token, phone_number_id = get_whatsapp_api_credentials()
+    if not all([access_token, phone_number_id]):
+        print("[Erro] Não foi possível enviar documento: credenciais da WhatsApp API ausentes.")
+        return False
+
+    to_number = normalize_whatsapp_to_number(to_number)
+
+    try:
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to_number,
+            "type": "document",
+            "document": {
+                "id": media_id,
+                "filename": filename,
+                "caption": caption,
+            },
+        }
+
+        print(f"Enviando documento (media_id) via WhatsApp API para {to_number}...")
+        response = requests.post(url, headers=headers, json=payload)
+
+        if response.status_code == 200:
+            response_data = response.json()
+            message_id = response_data.get("messages", [{}])[0].get("id", "unknown")
+            print(f"Documento enviado com sucesso via WhatsApp API. ID: {message_id}")
+            return True
+
+        print(f"Erro ao enviar documento via WhatsApp API: {response.status_code}")
+        print(f"Resposta: {response.text}")
+        return False
+    except Exception as e:
+        print(f"Erro ao enviar documento via WhatsApp API: {e}")
+        return False
+
+
+def upload_pdf_to_whatsapp_media(pdf_path: str) -> Optional[str]:
     """
-    Envia uma mensagem com PDF via WhatsApp Business API ou wrapper local usando Supabase para hospedar o arquivo.
-    
-    Args:
-        to_number: Número de telefone de destino (formato internacional)
-        pdf_path: Caminho local do arquivo PDF
-        caption: Legenda da mensagem
-        
-    Returns:
-        True se enviado com sucesso, False caso contrário
+    Faz upload do PDF para a Graph API da Meta e retorna o media_id.
     """
-    # Verificar se deve usar wrapper local
+    access_token, phone_number_id = get_whatsapp_api_credentials()
+    if not all([access_token, phone_number_id]):
+        print("[Erro] Credenciais da WhatsApp API ausentes para upload de mídia.")
+        return None
+
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/media"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        with open(pdf_path, "rb") as pdf_file:
+            files = {
+                "file": (os.path.basename(pdf_path), pdf_file, "application/pdf"),
+            }
+            data = {
+                "messaging_product": "whatsapp",
+                "type": "application/pdf",
+            }
+            print(f"Fazendo upload do PDF para a mídia da Meta: {os.path.basename(pdf_path)}")
+            response = requests.post(url, headers=headers, files=files, data=data)
+
+        if response.status_code == 200:
+            media_id = response.json().get("id")
+            print(f"Upload na Meta concluído. media_id={media_id}")
+            return media_id
+
+        print(f"Erro no upload de mídia para a Meta: {response.status_code}")
+        print(f"Resposta: {response.text}")
+        return None
+    except Exception as e:
+        print(f"Erro ao fazer upload do PDF para a Meta: {e}")
+        return None
+
+
+def send_whatsapp_pdf_message(to_number: str, pdf_path: str, caption: str = "Orçamento de Materiais") -> bool:
+    """
+    Envia PDF via WhatsApp Business API fazendo upload direto na Meta.
+    (Evita depender de URL pública do Supabase, que a Meta rejeita se o bucket não for público.)
+    """
     if should_use_local_wrapper():
         print("[WHATSAPP API] Usando wrapper local para envio de PDF")
         return send_local_whatsapp_pdf_message(to_number, pdf_path, caption)
-    
-    # Usar API real
+
     try:
-        # Importar aqui para evitar dependência circular
-        from app.services.supabase_client import upload_pdf_to_supabase
-        
-        # Primeiro, faz upload do PDF para o Supabase
-        print("Fazendo upload do PDF para o Supabase...")
-        pdf_url = upload_pdf_to_supabase(pdf_path)
-        
-        if not pdf_url:
-            print("[Erro] Falha ao fazer upload do PDF para o Supabase")
+        media_id = upload_pdf_to_whatsapp_media(pdf_path)
+        if not media_id:
+            print("[Erro] Falha ao fazer upload do PDF para a Meta")
             return False
-        
-        # Extrair nome do arquivo do caminho
+
         filename = os.path.basename(pdf_path)
-        
-        # Enviar documento via WhatsApp API
-        success = send_whatsapp_document_message(to_number, pdf_url, filename, caption)
-        
+        success = send_whatsapp_document_by_media_id(to_number, media_id, filename, caption)
         if success:
-            print(f"PDF enviado com sucesso via WhatsApp API")
-            print(f"Link do PDF: {pdf_url}")
-        
+            print("PDF enviado com sucesso via WhatsApp API (media_id)")
         return success
-        
     except Exception as e:
         print(f"Erro ao enviar PDF via WhatsApp API: {e}")
         return False
+
 
 def get_whatsapp_api_status() -> bool:
     """

@@ -8,14 +8,21 @@ def get_supabase_credentials():
     """
     Obtém as credenciais do Supabase das variáveis de ambiente.
     """
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
-    bucket_name = os.getenv("SUPABASE_BUCKET_NAME", "pdf-files")
+    url = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
+    key = (os.getenv("SUPABASE_KEY") or "").strip().strip('"').strip("'")
+    bucket_name = (os.getenv("SUPABASE_BUCKET_NAME") or "pdf-files").strip()
     
     if not all([url, key]):
         print("[Erro] Credenciais do Supabase não encontradas nas variáveis de ambiente.")
         print("Necessário: SUPABASE_URL, SUPABASE_KEY")
         return None, None, None
+
+    # A lib supabase-py espera a chave JWT legada (anon ou service_role, começa com eyJ).
+    if not key.startswith("eyJ") and "." not in key:
+        print(
+            "[Aviso] SUPABASE_KEY nao parece um JWT legado (anon/service_role). "
+            "No painel: Project Settings > API > Project API keys."
+        )
     
     return url, key, bucket_name
 

@@ -2,6 +2,10 @@ import os
 import google.generativeai as genai
 from typing import Dict, Optional
 
+# Modelo padrão atual (gemini-2.5-flash não está disponível para novas contas)
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+
+
 def get_gemini_credentials():
     """
     Obtém as credenciais do Gemini das variáveis de ambiente.
@@ -12,6 +16,18 @@ def get_gemini_credentials():
         return None
     
     return api_key
+
+
+def get_gemini_model_name() -> str:
+    """Nome do modelo Gemini (sobrescrevível via GEMINI_MODEL)."""
+    return os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+
+
+def get_gemini_model():
+    """Instancia o modelo GenerativeModel configurado."""
+    model_name = get_gemini_model_name()
+    print(f"Usando modelo Gemini: {model_name}")
+    return genai.GenerativeModel(model_name)
 
 def correct_transcription_with_gemini(transcribed_text: str, context: str = "obras") -> Optional[str]:
     """
@@ -31,7 +47,7 @@ def correct_transcription_with_gemini(transcribed_text: str, context: str = "obr
     try:
         # Configurar o Gemini
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = get_gemini_model()
         
         # Definir prompt baseado no contexto
         if context.lower() == "obras":
@@ -105,7 +121,7 @@ def analyze_transcription_context(transcribed_text: str) -> Dict[str, any]:
     
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = get_gemini_model()
         
         prompt = f"""
 Analise o seguinte texto transcrito e determine se ele se refere a:
@@ -154,7 +170,7 @@ def get_gemini_status():
     
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = get_gemini_model()
         
         # Teste simples
         response = model.generate_content("Teste de conectividade")
