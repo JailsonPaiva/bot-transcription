@@ -59,3 +59,29 @@ def get_last_budget(wa_id: str) -> Optional[Dict[str, Any]]:
     except Exception as exc:
         logger.warning("Falha ao buscar último orçamento: %s", exc)
         return None
+
+
+def delete_budgets_for_wa(wa_id: str) -> int:
+    """Remove histórico de orçamentos do número (LGPD). Retorna qtd aproximada."""
+    try:
+        from app.services.supabase_client import get_supabase_client
+
+        client = get_supabase_client()
+        if not client:
+            return 0
+
+        existing = (
+            client.table("budgets")
+            .select("id")
+            .eq("wa_id", wa_id)
+            .execute()
+        )
+        rows = existing.data or []
+        if not rows:
+            return 0
+
+        client.table("budgets").delete().eq("wa_id", wa_id).execute()
+        return len(rows)
+    except Exception as exc:
+        logger.warning("Falha ao apagar orçamentos de %s: %s", wa_id, exc)
+        return 0

@@ -19,13 +19,11 @@ def verify_meta_signature(
     """
     Valida X-Hub-Signature-256 (HMAC SHA-256 do body com META_APP_SECRET).
     """
-    if not settings.meta_app_secret:
-        if settings.require_webhook_signature:
-            raise HTTPException(status_code=500, detail="META_APP_SECRET não configurado")
-        logger.warning(
-            "META_APP_SECRET ausente — assinatura do webhook não validada (apenas para dev)."
-        )
+    if not settings.require_webhook_signature:
         return
+
+    if not settings.meta_app_secret:
+        raise HTTPException(status_code=500, detail="META_APP_SECRET não configurado")
 
     if not signature_header:
         raise HTTPException(status_code=403, detail="Missing X-Hub-Signature-256")

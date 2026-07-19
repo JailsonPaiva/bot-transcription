@@ -11,19 +11,34 @@ from app.domain.catalog_service import calc_budget_total, enrich_materials_with_
 from app.domain.conversation import (
     ConversationSession,
     ConversationState,
+    apply_quantity_change,
+    apply_remove_material,
     build_confirmation_message,
+    build_privacy_policy_message,
+    build_processing_started_message,
     digits_only,
     format_destination_number,
     is_cancel_message,
     is_confirmation_message,
+    is_delete_data_request,
     is_last_budget_request,
+    is_privacy_policy_request,
+    is_show_list_request,
+    parse_add_material,
+    parse_quantity_change,
+    parse_remove_item,
 )
 from app.domain.materials import resolve_materials_from_text
-from app.infrastructure.budget_repository import get_last_budget, save_budget
+from app.infrastructure.budget_repository import (
+    delete_budgets_for_wa,
+    get_last_budget,
+    save_budget,
+)
 from app.infrastructure.messaging import send_pdf, send_text
 from app.infrastructure.retry import with_retries
 from app.infrastructure.store import StateStore, get_state_store
 from app.services.gladia_transcription import transcribe_audio_gladia
+from app.services.nlp_obras import extract_construction_context
 from app.services.pdf_obras_generator import create_construction_budget_pdf
 from app.services.transcription import transcribe_audio
 from app.services.whatsapp_cliente import download_media
@@ -117,6 +132,152 @@ def _handle_last_budget(wa_id: str, formatted_number: str, settings: Settings) -
     return True
 
 
+def _handle_lgpd(
+    *,
+    body: str,
+    wa_id: str,
+    formatted_number: str,
+    store: StateStore,
+    settings: Settings,
+) -> bool:
+    if is_privacy_policy_request(body):
+        send_text(formatted_number, build_privacy_policy_message(), settings)
+        return True
+
+    if is_delete_data_request(body):
+        store.clear_session(wa_id)
+        deleted = delete_budgets_for_wa(wa_id)
+        send_text(
+            formatted_number,
+            "Pronto. Apaguei a sessão deste chat"
+            + (f" e {deleted} orçamento(ns) do histórico." if deleted else ".")
+            + "\nSe quiser um novo orçamento, envie um áudio com os materiais.",
+            settings,
+        )
+        return True
+
+    return False
+
+
+def _save_edited_session(
+    *,
+    store: StateStore,
+    wa_id: str,
+    materials: List[Dict[str, Any]],
+    obra_type: str,
+    texto: str,
+    note: str,
+    formatted_number: str,
+    settings: Settings,
+) -> None:
+    materials = enrich_materials_with_prices(materials)
+    session = ConversationSession(
+        state=ConversationState.AWAITING_CONFIRMATION,
+        materials=materials,
+        obra_type=obra_type,
+        texto=texto,
+    )
+    store.save_session(wa_id, session)
+    send_text(
+        formatted_number,
+        f"{note}\n\n" + build_confirmation_message(materials, obra_type),
+        settings,
+    )
+
+
+def _handle_list_edit(
+    *,
+    body: str,
+    session: ConversationSession,
+    wa_id: str,
+    formatted_number: str,
+    store: StateStore,
+    settings: Settings,
+) -> bool:
+    """Handlers de edição enquanto aguarda confirmação. True se consumiu a mensagem."""
+    if is_show_list_request(body):
+        send_text(
+            formatted_number,
+            build_confirmation_message(session.materials, session.obra_type),
+            settings,
+        )
+        return True
+
+    remove_target = parse_remove_item(body)
+    if remove_target:
+        # Evita conflito com "apagar meus dados" (já tratado antes)
+        updated, note = apply_remove_material(list(session.materials), remove_target)
+        if note and "Não encontrei" in note:
+            send_text(formatted_number, note, settings)
+            return True
+        if not updated:
+            store.clear_session(wa_id)
+            send_text(
+                formatted_number,
+                f"{note}\nA lista ficou vazia. Envie um novo áudio com os materiais.",
+                settings,
+            )
+            return True
+        _save_edited_session(
+            store=store,
+            wa_id=wa_id,
+            materials=updated,
+            obra_type=session.obra_type,
+            texto=session.texto,
+            note=note or "Lista atualizada.",
+            formatted_number=formatted_number,
+            settings=settings,
+        )
+        return True
+
+    qty_change = parse_quantity_change(body)
+    if qty_change:
+        index, qty = qty_change
+        updated, note = apply_quantity_change(list(session.materials), index, qty)
+        if note and "Não encontrei" in note:
+            send_text(formatted_number, note, settings)
+            return True
+        _save_edited_session(
+            store=store,
+            wa_id=wa_id,
+            materials=updated,
+            obra_type=session.obra_type,
+            texto=session.texto,
+            note=note or "Quantidade atualizada.",
+            formatted_number=formatted_number,
+            settings=settings,
+        )
+        return True
+
+    add_text = parse_add_material(body)
+    if add_text:
+        ctx = extract_construction_context(add_text)
+        new_items = enrich_materials_with_prices(ctx.get("materiais") or [])
+        if not new_items:
+            send_text(
+                formatted_number,
+                "Não consegui identificar o material para adicionar. "
+                "Ex.: *adiciona 10 saco cimento*",
+                settings,
+            )
+            return True
+        merged = list(session.materials) + new_items
+        names = ", ".join(i["material"] for i in new_items)
+        _save_edited_session(
+            store=store,
+            wa_id=wa_id,
+            materials=merged,
+            obra_type=session.obra_type,
+            texto=session.texto,
+            note=f"Adicionei: {names}.",
+            formatted_number=formatted_number,
+            settings=settings,
+        )
+        return True
+
+    return False
+
+
 def _handle_text(
     *,
     body: str,
@@ -125,13 +286,26 @@ def _handle_text(
     store: StateStore,
     settings: Settings,
 ) -> None:
+    if _handle_lgpd(
+        body=body,
+        wa_id=wa_id,
+        formatted_number=formatted_number,
+        store=store,
+        settings=settings,
+    ):
+        return
+
     if is_last_budget_request(body):
         _handle_last_budget(wa_id, formatted_number, settings)
         return
 
     session = store.get_session(wa_id)
+    in_confirm = session.state in {
+        ConversationState.AWAITING_CONFIRMATION,
+        ConversationState.EDITING,
+    }
 
-    if session.state == ConversationState.AWAITING_CONFIRMATION and is_confirmation_message(body):
+    if in_confirm and is_confirmation_message(body):
         materials = session.materials
         obra_type = session.obra_type
         store.clear_session(wa_id)
@@ -149,7 +323,7 @@ def _handle_text(
         )
         return
 
-    if session.state == ConversationState.AWAITING_CONFIRMATION and is_cancel_message(body):
+    if in_confirm and is_cancel_message(body):
         store.clear_session(wa_id)
         send_text(
             formatted_number,
@@ -158,22 +332,34 @@ def _handle_text(
         )
         return
 
-    if session.state == ConversationState.AWAITING_CONFIRMATION:
+    if in_confirm and _handle_list_edit(
+        body=body,
+        session=session,
+        wa_id=wa_id,
+        formatted_number=formatted_number,
+        store=store,
+        settings=settings,
+    ):
+        return
+
+    if in_confirm:
         send_text(
             formatted_number,
             "Há uma lista aguardando confirmação.\n"
-            "Responda *SIM* para gerar o PDF ou *NÃO* para cancelar.\n\n"
+            "Responda *SIM*, *NÃO*, ou edite com `remove N` / `qtd N=X` / `adiciona ...`.\n\n"
             + build_confirmation_message(session.materials, session.obra_type),
             settings,
         )
         return
 
-    send_text(
+    ok = send_text(
         formatted_number,
         "Envie um áudio descrevendo os materiais da obra para eu montar o orçamento.\n"
-        "Se quiser, peça também: *último orçamento*.",
+        "Se quiser, peça também: *último orçamento* ou *privacidade*.",
         settings,
     )
+    if not ok:
+        logger.error("Falha ao enviar resposta de orientação para %s", formatted_number)
 
 
 def _handle_audio(
@@ -289,6 +475,17 @@ def process_incoming_message(message_data: Dict[str, Any], settings: Settings | 
         return
 
     msg_type = message_data.get("type")
+
+    # ACK imediato após claim (webhook já devolveu 200; usuário sente progresso)
+    try:
+        send_text(
+            formatted_number,
+            build_processing_started_message(msg_type if isinstance(msg_type, str) else None),
+            settings,
+        )
+    except Exception:
+        logger.exception("Falha ao enviar ACK de processamento para %s", formatted_number)
+
     try:
         if msg_type == "text":
             body = (message_data.get("text") or {}).get("body", "")

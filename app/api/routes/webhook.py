@@ -1,10 +1,11 @@
 """Webhook Meta — endpoint fino (responde 200 rápido e enfileira job)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.core.config import get_settings
 from app.core.security import read_and_verify_request
@@ -12,6 +13,9 @@ from app.jobs.process_message import process_incoming_message
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["webhook"])
+
+# Evita GC de tasks em background (asyncio.create_task sem referência forte)
+_pending_tasks: set[asyncio.Task] = set()
 
 
 @router.get("/webhook")
@@ -28,7 +32,7 @@ async def verify_webhook(request: Request):
 
 
 @router.post("/webhook")
-async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
+async def handle_webhook(request: Request):
     settings = get_settings()
 
     try:
@@ -39,8 +43,6 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
     except Exception as exc:
         logger.warning("Payload inválido no webhook: %s", exc)
         return Response(status_code=200)
-
-    logger.info("Webhook recebido (enfileirando processamento)")
 
     try:
         changes = data["entry"][0]["changes"][0]
@@ -53,7 +55,27 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
             return Response(status_code=200)
 
         message_data = value["messages"][0]
-        background_tasks.add_task(process_incoming_message, message_data, settings)
+        msg_id = message_data.get("id", "?")
+        logger.info(
+            "Webhook mensagem %s type=%s — processando em background",
+            msg_id,
+            message_data.get("type"),
+        )
+
+        task = asyncio.create_task(
+            asyncio.to_thread(process_incoming_message, message_data, settings)
+        )
+        _pending_tasks.add(task)
+
+        def _done(t: asyncio.Task) -> None:
+            _pending_tasks.discard(t)
+            try:
+                t.result()
+                logger.info("Job concluído para mensagem %s", msg_id)
+            except Exception:
+                logger.exception("Job em background falhou para mensagem %s", msg_id)
+
+        task.add_done_callback(_done)
     except Exception as exc:
         logger.exception("Falha ao enfileirar mensagem: %s", exc)
 

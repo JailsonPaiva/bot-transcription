@@ -11,11 +11,12 @@ app/
   services/               # Adaptadores de APIs externas
 supabase/migrations/      # SQL do catálogo e histórico
 scripts/                  # utilitários (seed do catálogo)
+tests/                    # testes unitários (edição de lista, LGPD)
 ```
 
 ## Sprint 1
 
-- Webhook responde `200` imediatamente e processa em `BackgroundTasks`
+- Webhook responde `200` imediatamente e processa em background
 - Estado (dedupe + sessão) em Redis, com fallback em memória
 - Validação opcional de `X-Hub-Signature-256` via `META_APP_SECRET`
 - Retries com backoff no download/transcrição
@@ -37,6 +38,17 @@ scripts/                  # utilitários (seed do catálogo)
 python scripts/seed_catalog.py --overwrite-prices
 ```
 
+## Sprint 3
+
+- ACK imediato ao usuário assim que a mensagem é reivindicada (após o webhook 200)
+- Edição da lista antes do PDF:
+  - `remove N` / `tira cimento`
+  - `qtd N=X` / `muda N para X`
+  - `adiciona …`
+  - `lista`
+- LGPD mínima: `privacidade` e `apagar meus dados` (limpa sessão Redis + histórico `budgets`)
+- Rate limit de áudio por `wa_id` (já na Sprint 1; mantido)
+
 ## Subir Redis
 
 ```bash
@@ -45,6 +57,8 @@ docker compose up -d redis
 
 ## Rodar API
 
+Use a skill `restart-servers` (mata processos e sobe **sem** `--reload`):
+
 ```bash
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
